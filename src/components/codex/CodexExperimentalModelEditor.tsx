@@ -31,6 +31,7 @@ import {
 } from "../../utils/codexModelContext";
 import { getCodexModelReasoningEfforts } from "../../services/codexService";
 import { CODEX_REASONING_EFFORT_ORDER, sortCodexReasoningEfforts, withSupportedReasoningEfforts } from "../../utils/codexModelConfig";
+import { dropdownLayer, dropdownPlacement, type DropdownPlacement } from "../../utils/dropdownPlacement";
 import { SingleSelectDropdown } from "../SingleSelectDropdown";
 import { CodexModelConfigTransferModal } from "./CodexModelConfigTransferModal";
 import "./CodexExperimentalModelEditor.css";
@@ -410,8 +411,16 @@ export function CodexExperimentalModelEditor({
   const [draggingModelId, setDraggingModelId] = useState<string | null>(null);
   const [channelSearchQuery, setChannelSearchQuery] = useState("");
   const addMenuRef = useRef<HTMLDivElement | null>(null);
-  const reasoningPickerRef = useRef<HTMLDivElement | null>(null);
-  const contextPickerRef = useRef<HTMLDivElement | null>(null);
+  const pickerTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const pickerMenuRef = useRef<HTMLDivElement | null>(null);
+  const [pickerMenuStyle, setPickerMenuStyle] = useState<DropdownPlacement | null>(null);
+  const pickerOpen = !disabled && (mode === "inline" || managerOpen)
+    && (openReasoningIndex !== null || openContextIndex !== null);
+  useEffect(() => {
+    if (!disabled && (mode === "inline" || managerOpen)) return;
+    setOpenReasoningIndex(null);
+    setOpenContextIndex(null);
+  }, [disabled, mode, managerOpen]);
 
   useEffect(() => {
     if (!addMenuOpen) return;
@@ -426,28 +435,38 @@ export function CodexExperimentalModelEditor({
   }, [addMenuOpen]);
 
   useEffect(() => {
-    if (openReasoningIndex === null) return;
+    if (!pickerOpen) return;
+    const updateMenuPosition = (event?: Event) => {
+      const target = event?.target;
+      if (event?.type === "scroll" && target instanceof Node && pickerMenuRef.current?.contains(target)) return;
+      const trigger = pickerTriggerRef.current;
+      if (!trigger) return;
+      const layers: string[] = [];
+      for (let ancestor: Element | null = trigger; ancestor; ancestor = ancestor.parentElement) {
+        layers.push(window.getComputedStyle(ancestor).zIndex);
+      }
+      const nextStyle = dropdownPlacement(trigger.getBoundingClientRect(),
+        { width: window.innerWidth, height: window.innerHeight }, "down", 180, 280, dropdownLayer(layers));
+      setPickerMenuStyle((previous) => previous && previous.top === nextStyle.top && previous.bottom === nextStyle.bottom
+        && previous.left === nextStyle.left && previous.width === nextStyle.width && previous.maxHeight === nextStyle.maxHeight
+        && previous.zIndex === nextStyle.zIndex ? previous : nextStyle);
+    };
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (!reasoningPickerRef.current?.contains(target)) {
-        setOpenReasoningIndex(null);
-      }
+      if (pickerTriggerRef.current?.contains(target) || pickerMenuRef.current?.contains(target)) return;
+      setOpenReasoningIndex(null);
+      setOpenContextIndex(null);
     };
+    updateMenuPosition();
     document.addEventListener("pointerdown", handlePointerDown);
-    return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [openReasoningIndex]);
-
-  useEffect(() => {
-    if (openContextIndex === null) return;
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target as Node;
-      if (!contextPickerRef.current?.contains(target)) {
-        setOpenContextIndex(null);
-      }
+    window.addEventListener("resize", updateMenuPosition);
+    window.addEventListener("scroll", updateMenuPosition, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("resize", updateMenuPosition);
+      window.removeEventListener("scroll", updateMenuPosition, true);
     };
-    document.addEventListener("pointerdown", handlePointerDown);
-    return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [openContextIndex]);
+  }, [openReasoningIndex, openContextIndex, managerOpen, pickerOpen]);
 
   useEffect(() => {
     if (draggingModelId === null) return;
@@ -1032,10 +1051,8 @@ export function CodexExperimentalModelEditor({
 
       <div
         className={`codex-experimental-model-editor__list${
-          openReasoningIndex !== null || openContextIndex !== null
-            ? " has-open-menu"
-            : ""
-        }${draggingModelId ? " is-sorting" : ""}`}
+          draggingModelId ? " is-sorting" : ""
+        }`}
       >
         {models.map((model, index) => {
           const source = resolveModelSource?.(model.model_id);
@@ -1138,9 +1155,6 @@ export function CodexExperimentalModelEditor({
               )}
               <div
                 className="codex-experimental-model-editor__reasoning"
-                ref={
-                  openReasoningIndex === index ? reasoningPickerRef : undefined
-                }
               >
                 <span className="codex-experimental-model-editor__field-label">
                   {t(
@@ -1150,9 +1164,11 @@ export function CodexExperimentalModelEditor({
                 </span>
                 <div className="codex-experimental-model-editor__reasoning-picker">
                   <button
+                    ref={openReasoningIndex === index ? pickerTriggerRef : undefined}
                     type="button"
                     className="codex-experimental-model-editor__reasoning-trigger"
                     onClick={() => {
+                      setPickerMenuStyle(null);
                       setOpenContextIndex(null);
                       setOpenReasoningIndex((current) =>
                         current === index ? null : index,
@@ -1179,8 +1195,10 @@ export function CodexExperimentalModelEditor({
                     </span>
                     <ChevronDown size={14} />
                   </button>
-                  {openReasoningIndex === index && (
-                    <div className="codex-experimental-model-editor__reasoning-menu">
+                  {pickerOpen && openReasoningIndex === index && createPortal(
+                    <div className="codex-experimental-model-editor__reasoning-menu"
+                      ref={pickerMenuRef}
+                      style={{ ...pickerMenuStyle, visibility: pickerMenuStyle ? "visible" : "hidden" }}>
                       <button
                         type="button"
                         className={`codex-experimental-model-editor__reasoning-option${
@@ -1231,7 +1249,8 @@ export function CodexExperimentalModelEditor({
                           </button>
                         );
                       })}
-                    </div>
+                    </div>,
+                    document.body,
                   )}
                 </div>
               </div>
@@ -1250,9 +1269,6 @@ export function CodexExperimentalModelEditor({
               </div>
               <div
                 className="codex-experimental-model-editor__context"
-                ref={
-                  openContextIndex === index ? contextPickerRef : undefined
-                }
               >
                 <span className="codex-experimental-model-editor__field-label">
                   {t(
@@ -1262,9 +1278,11 @@ export function CodexExperimentalModelEditor({
                 </span>
                 <div className="codex-experimental-model-editor__context-picker">
                   <button
+                    ref={openContextIndex === index ? pickerTriggerRef : undefined}
                     type="button"
                     className="codex-experimental-model-editor__context-trigger"
                     onClick={() => {
+                      setPickerMenuStyle(null);
                       setOpenReasoningIndex(null);
                       setOpenContextIndex((current) =>
                         current === index ? null : index,
@@ -1277,8 +1295,10 @@ export function CodexExperimentalModelEditor({
                     <span>{contextLabel(model)}</span>
                     <ChevronDown size={14} />
                   </button>
-                  {openContextIndex === index && (
-                    <div className="codex-experimental-model-editor__context-menu">
+                  {pickerOpen && openContextIndex === index && createPortal(
+                    <div className="codex-experimental-model-editor__context-menu"
+                      ref={pickerMenuRef}
+                      style={{ ...pickerMenuStyle, visibility: pickerMenuStyle ? "visible" : "hidden" }}>
                       {(
                         [
                           [
@@ -1318,7 +1338,8 @@ export function CodexExperimentalModelEditor({
                           {label}
                         </button>
                       ))}
-                    </div>
+                    </div>,
+                    document.body,
                   )}
                 </div>
                 {rowErrors[index]?.context && (
