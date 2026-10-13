@@ -1727,7 +1727,16 @@ pub async fn codex_get_instance_quick_config(
             if let Some(models) =
                 modules::codex_local_access::api_service_preview_model_definitions(&base_dir)
             {
-                config.experimental_model_catalog_models = models;
+                config.experimental_model_catalog_models = models
+                    .into_iter()
+                    .map(|model| {
+                        config.experimental_model_catalog_models
+                            .iter()
+                            .find(|saved| saved.model_id == model.model_id)
+                            .cloned()
+                            .unwrap_or(model)
+                    })
+                    .collect();
             }
         }
         if let Some(draft) = read_pending_model_catalog(&base_dir)? {
