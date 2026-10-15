@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildProviderModelVisionCapabilities,
   expandLegacyProviderVisionCapabilities,
+  materializeProviderModelVisionCapabilities,
   providerModelDefaultsToVisionInput,
   resolveProviderModelVisionState,
 } from "./codexModelProviderVision.ts";
@@ -63,6 +64,24 @@ test("keeps explicit per-model decisions and only fills the gaps", () => {
   assert.deepEqual(provider.modelCapabilities, {
     "gpt-5.5": { supportsVision: false },
     "gpt-5.6-sol": { supportsVision: true },
+  });
+});
+
+test("materializes every catalog model and removes stale capability entries", () => {
+  const provider = {
+    baseUrl: "https://relay.example.com/v1",
+    supportsVision: false,
+    modelCatalog: ["gpt-6-luna", "gpt-4o"],
+    modelCapabilities: {
+      "gpt-4o": { supportsVision: false },
+      "stale-model": { supportsVision: true },
+    },
+  };
+
+  assert.equal(materializeProviderModelVisionCapabilities(provider), true);
+  assert.deepEqual(provider.modelCapabilities, {
+    "gpt-6-luna": { supportsVision: true },
+    "gpt-4o": { supportsVision: false },
   });
 });
 

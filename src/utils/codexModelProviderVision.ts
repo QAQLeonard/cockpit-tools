@@ -19,12 +19,24 @@ export function resolveProviderModelVisionState(
     (providerDefault || providerModelDefaultsToVisionInput(modelId));
 }
 
-/** Only stored entries and explicit user choices enter states; retain false overrides. */
+/** 根据模型目录生成完整的最终能力表；显式模型值优先于供应商默认值和模型默认值。 */
 export function buildProviderModelVisionCapabilities(
   modelText: string,
   states: Record<string, boolean>,
+  modelCatalog: string[] = [],
+  providerDefault = false,
 ): Record<string, { supportsVision: boolean }> {
   const capabilities: Record<string, { supportsVision: boolean }> = {};
+  if (modelCatalog.length > 0) {
+    for (const model of modelCatalog) {
+      const key = model.trim().toLowerCase();
+      if (!key) continue;
+      capabilities[key] = {
+        supportsVision: resolveProviderModelVisionState(model, states, providerDefault),
+      };
+    }
+    return capabilities;
+  }
   for (const model of modelText.split(/[\n,]+/)) {
     const key = model.trim().toLowerCase();
     if (key) capabilities[key] = { supportsVision: true };
@@ -83,6 +95,38 @@ export function expandLegacyProviderVisionCapabilities(
     next[key] = { supportsVision: true };
     changed = true;
   }
+  if (!changed) return false;
+  provider.modelCapabilities = next;
+  return true;
+}
+
+/** 将非 DeepSeek provider 的模型目录和默认规则展开并持久化为完整能力表。 */
+export function materializeProviderModelVisionCapabilities(
+  provider: CodexModelProviderVisionInput,
+): boolean {
+  if (resolveCodexApiProviderPresetId(provider.baseUrl) === DEEPSEEK_API_PROVIDER_ID) {
+    return false;
+  }
+  const catalog = provider.modelCatalog ?? [];
+  if (catalog.length === 0) return false;
+  const states = Object.fromEntries(
+    Object.entries(provider.modelCapabilities ?? {}).map(([model, capability]) => [
+      model.trim().toLowerCase(),
+      capability.supportsVision === true,
+    ]),
+  );
+  const next = buildProviderModelVisionCapabilities(
+    "",
+    states,
+    catalog,
+    provider.supportsVision === true,
+  );
+  const previous = provider.modelCapabilities ?? {};
+  const changed =
+    Object.keys(previous).length !== Object.keys(next).length ||
+    Object.entries(next).some(
+      ([model, capability]) => previous[model]?.supportsVision !== capability.supportsVision,
+    );
   if (!changed) return false;
   provider.modelCapabilities = next;
   return true;

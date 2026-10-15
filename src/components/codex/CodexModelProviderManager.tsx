@@ -2217,6 +2217,8 @@ export function useCodexModelProviderManagerController({
     const modelCapabilities = buildProviderModelVisionCapabilities(
       form.visionModelText,
       form.visionModelStates,
+      modelCatalog,
+      form.supportsVision,
     );
     const visionRoutingModel = form.visionRoutingModel.trim();
     const isCreate = !form.providerId;

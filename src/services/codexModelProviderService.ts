@@ -23,7 +23,10 @@ import {
   type ModelProviderUsageSummary,
 } from './modelProviderUsageService';
 import { moveCodexProviderApiKey } from '../utils/codexModelProviderApiKeyMove';
-import { expandLegacyProviderVisionCapabilities } from '../utils/codexModelProviderVision';
+import {
+  expandLegacyProviderVisionCapabilities,
+  materializeProviderModelVisionCapabilities,
+} from '../utils/codexModelProviderVision';
 import { cloneCodexProviderModelConfig, type CodexProviderModelConfig } from '../utils/codexModelProviderKeyConfig';
 
 export interface CodexModelProviderApiKey extends CodexProviderModelConfig {
@@ -536,20 +539,24 @@ async function ensureProvidersLoaded(): Promise<CodexModelProvider[]> {
   const migration = migrateApiKeyFunProvider(loaded);
   loaded = migration.providers;
   let migratedDeepSeek = false;
-  let migratedLegacyVision = false;
+  let migratedVisionCapabilities = false;
   for (const provider of loaded) {
     migratedDeepSeek = enforceDeepSeekProvider(provider) || migratedDeepSeek;
     // 旧版本的供应商级识图开关展开成逐模型能力，避免网关把图片当 text-only 丢弃。
     if (expandLegacyProviderVisionCapabilities(provider)) {
       provider.updatedAt = Date.now();
-      migratedLegacyVision = true;
+      migratedVisionCapabilities = true;
+    }
+    if (materializeProviderModelVisionCapabilities(provider)) {
+      provider.updatedAt = Date.now();
+      migratedVisionCapabilities = true;
     }
   }
   if (
     loaded.length !== loadedProviders.length ||
     migration.changed ||
     migratedDeepSeek ||
-    migratedLegacyVision ||
+    migratedVisionCapabilities ||
     loadResult.removedImageGenerationSetting ||
     loadResult.migratedSupportsWebsockets
   ) {

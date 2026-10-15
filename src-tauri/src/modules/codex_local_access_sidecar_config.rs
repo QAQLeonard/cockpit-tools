@@ -2634,15 +2634,24 @@ fn prepare_sidecar_launch_config_in_dir_sync(
                 manifest_accounts.push(value);
                 continue;
             }
-            // 与自动混合路由的判定保持一致：Chat 协议账号、以及具备逐模型识图能力的账号
-            // （例如 DeepSeek）走 provider 路由，这样带图片的请求才能自动转到识图模型。
+            // 与自动混合路由使用同一判定：Chat Completions 做协议转换；
+            // Responses 只有在存在可用的图片转模型目标时才走 provider 路由。
+            let candidate_route_models = automatic_api_service_route_models(
+                collection,
+                &account,
+                &api_service_supported_codex_model_ids(),
+            );
+            let upstream_models = normalize_model_rule_list(
+                candidate_route_models
+                    .iter()
+                    .filter_map(|model| model["upstreamModel"].as_str().map(str::to_string))
+                    .collect(),
+            );
             let provider_route_models =
-                if api_service && automatic_api_service_provider_route_eligible(&account) {
-                    automatic_api_service_route_models(
-                        collection,
-                        &account,
-                        &api_service_supported_codex_model_ids(),
-                    )
+                if api_service
+                    && automatic_api_service_provider_route_eligible(&account, &upstream_models)
+                {
+                    candidate_route_models
                 } else {
                     Vec::new()
                 };
