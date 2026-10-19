@@ -88,6 +88,29 @@ fn native_automatic_vision_routes_use_actual_upstream_model_and_fail_closed_on_a
     );
 }
 
+#[test]
+fn native_responses_vision_capabilities_do_not_change_routing_or_model() {
+    let collection = native_test_collection();
+    let mut account = native_automatic_fixture();
+    account.api_wire_api = Some("responses".into());
+    let plan = native_model_route_plan(&collection, None, "client-text").unwrap();
+
+    assert!(!native_automatic_provider_route_eligible(&collection, &account));
+    assert_eq!(
+        native_operation_model(&collection, &plan, &account, None, true).as_deref(),
+        Some("upstream-text"),
+        "a capability table must not redirect an ordinary Responses request"
+    );
+
+    account.api_vision_routing_model = Some("upstream-vision".into());
+    assert!(native_automatic_provider_route_eligible(&collection, &account));
+    assert_eq!(
+        native_operation_model(&collection, &plan, &account, None, true).as_deref(),
+        Some("upstream-vision"),
+        "an explicit vision redirect must still use the configured upstream"
+    );
+}
+
 #[tokio::test]
 async fn native_automatic_vision_selection_applies_target_acl_and_cooldown_before_credentials() {
     let mut collection = native_test_collection();

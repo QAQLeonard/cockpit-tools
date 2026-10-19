@@ -957,7 +957,7 @@ async fn native_select_route_once(
         // The old automatic gateway exhausts native candidates before provider routes.
         // Preserve the configured selection order within each group.
         accounts.sort_by_key(|account| {
-            automatic_api_service_provider_route_eligible(account)
+            native_automatic_provider_route_eligible(&collection, account)
                 && !codex_account::is_grok_upstream_provider(account)
         });
     }
