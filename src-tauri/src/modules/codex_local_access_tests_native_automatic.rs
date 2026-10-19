@@ -112,6 +112,34 @@ fn native_responses_vision_capabilities_do_not_change_routing_or_model() {
 }
 
 #[tokio::test]
+async fn native_automatic_custom_priority_is_shared_across_keys_and_transports() {
+    let mut collection = native_test_collection();
+    collection.routing_strategy = CodexLocalAccessRoutingStrategy::Custom;
+    collection.custom_routing_rules = vec![
+        serde_json::from_value(json!({"accountId":"pool-a","priority":10,"weight":1,"isPreferred":true})).unwrap(),
+        serde_json::from_value(json!({"accountId":"pool-b","priority":1,"weight":1})).unwrap(),
+    ];
+    for id in ["key-default", "key-a", "key-b"] {
+        let mut key = native_test_key();
+        key.id = id.into();
+        collection.api_keys.push(key);
+    }
+    let preferred = native_automatic_fixture();
+    let mut fallback = preferred.clone();
+    fallback.id = "pool-b".into();
+    fallback.api_wire_api = Some("responses".into());
+    let mut host = NativeHostBridge::for_collection(collection);
+    host.account_overrides.insert(preferred.id.clone(), preferred);
+    host.account_overrides.insert(fallback.id.clone(), fallback);
+    for id in ["key-default", "key-a", "key-b"] {
+        let mut request = native_test_route_request(id);
+        request.model = "client-text".into();
+        let route = native_select_route(&host, &native_test_caller(id), request).await.unwrap();
+        assert_eq!(route.account_id, "pool-a", "provider/native grouping overrode priority for {id}");
+    }
+}
+
+#[tokio::test]
 async fn native_automatic_vision_selection_applies_target_acl_and_cooldown_before_credentials() {
     let mut collection = native_test_collection();
     collection.account_ids = vec!["pool-a".into()];

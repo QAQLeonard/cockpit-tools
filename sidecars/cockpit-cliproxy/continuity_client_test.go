@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/gin-gonic/gin"
 	"io"
 	"net/http"
@@ -171,6 +172,46 @@ func TestContinuityClientDisabledOriginalDoesNotPinUnselectableAuth(t *testing.T
 				}
 			}
 		})
+	}
+}
+
+func TestContinuityCustomPriorityAppliesToEveryKeyWithoutBreakingProtectedHistory(t *testing.T) {
+	for _, keyID := range []string{"legacy", "key-default", "key-team-a", "key-team-b"} {
+		for _, selfContained := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/portable=%t", keyID, selfContained), func(t *testing.T) {
+				m := continuityManifestFixture(t)
+				m.RoutingStrategy = "custom"
+				m.CustomRoutingRules = []customRoutingRule{{AccountID: "local-a", Priority: 10}, {AccountID: "local-b", Priority: 1}}
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"ticket": "custom-priority", "preferred_account_id": "local-b",
+						"self_contained": selfContained, "body": map[string]any{"input": []any{}},
+					})
+				}))
+				defer server.Close()
+				client, _ := newContinuityClient(server.URL, strings.Repeat("a", 64), m)
+				defer client.Close()
+				ctx := context.WithValue(context.Background(), clientAPIKeyContextKey, &apiKeySpec{ID: keyID, Enabled: true, AccountIDs: []string{"local-a", "local-b"}})
+				result, err := client.Prepare(ctx, coreexecutor.ContinuityPrepareRequest{RequestID: "turn", Body: json.RawMessage(`{"input":[]}`)})
+				if err != nil || !result.RequireCodex {
+					t.Fatalf("continuity protection lost: %+v %v", result, err)
+				}
+				if !selfContained {
+					if result.PreferredAccountID != "sdk-b" {
+						t.Fatalf("protected continuation must keep its original account: %q", result.PreferredAccountID)
+					}
+					return
+				}
+				if result.PreferredAccountID != "" {
+					t.Fatalf("portable history bypasses custom priorities: %q", result.PreferredAccountID)
+				}
+				selector := &cockpitSelector{manifest: m}
+				selected, err := selector.Pick(ctx, "codex", "gpt-6.1-sol", coreexecutor.Options{}, m.authManager.List())
+				if err != nil || selected == nil || selected.ID != "sdk-a" {
+					t.Fatalf("custom priority not applied for key %s: %+v %v", keyID, selected, err)
+				}
+			})
+		}
 	}
 }
 
