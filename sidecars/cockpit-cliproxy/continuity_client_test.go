@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/gin-gonic/gin"
 	"io"
 	"net/http"
@@ -120,6 +121,56 @@ func TestContinuityClientStateDependentHistoryRequiresAvailableOriginal(t *testi
 	result, err := client.Prepare(ctx, coreexecutor.ContinuityPrepareRequest{RequestID: "one", Body: json.RawMessage(`{"previous_response_id":"remote-only","input":[]}`)})
 	if err == nil || result.PreferredAccountID != "removed-a" || finishes != 1 {
 		t.Fatal("state-dependent history lost its original account binding", result, err, finishes)
+	}
+}
+
+func TestContinuityClientDisabledOriginalDoesNotPinUnselectableAuth(t *testing.T) {
+	for _, selfContained := range []bool{false, true} {
+		t.Run(map[bool]string{false: "protected", true: "complete-history"}[selfContained], func(t *testing.T) {
+			m := continuityManifestFixture(t)
+			auth, _ := m.authManager.GetByID("sdk-b")
+			auth.Disabled = true
+			auth.Status = coreauth.StatusDisabled
+			if _, err := m.authManager.Update(context.Background(), auth); err != nil {
+				t.Fatal(err)
+			}
+			finishes, releases := 0, 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/v1/continuity/prepare":
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"ticket": "disabled-owner", "preferred_account_id": "local-b",
+						"self_contained": selfContained, "body": map[string]any{"input": []any{}},
+					})
+				case "/v1/continuity/finish":
+					finishes++
+					_, _ = io.WriteString(w, `{}`)
+				case "/v1/continuity/release":
+					releases++
+					_, _ = io.WriteString(w, `{}`)
+				default:
+					t.Errorf("unexpected control request: %s", r.URL.Path)
+				}
+			}))
+			defer server.Close()
+			client, err := newContinuityClient(server.URL, strings.Repeat("a", 64), m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer client.Close()
+			ctx := context.WithValue(context.Background(), clientAPIKeyContextKey, &apiKeySpec{ID: "legacy", Enabled: true})
+			result, err := client.Prepare(ctx, coreexecutor.ContinuityPrepareRequest{RequestID: "disabled", Body: json.RawMessage(`{"input":[]}`)})
+			if selfContained {
+				if err != nil || result.PreferredAccountID != "" || finishes != 0 || releases != 0 {
+					t.Fatalf("complete history must remain eligible for an active account: preferred=%q error=%v cleanup=%d/%d", result.PreferredAccountID, err, finishes, releases)
+				}
+			} else {
+				var controlErr continuityControlError
+				if !errors.As(err, &controlErr) || controlErr.code != "account_binding_unavailable" || controlErr.status != http.StatusConflict || finishes != 1 || releases != 1 {
+					t.Fatalf("protected history must report its unavailable owner and release the ticket: error=%v cleanup=%d/%d", err, finishes, releases)
+				}
+			}
+		})
 	}
 }
 

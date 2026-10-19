@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"time"
 
+	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 )
 
@@ -159,6 +160,13 @@ func (c *continuityClient) Prepare(ctx context.Context, request coreexecutor.Con
 		mapped := ""
 		if c.manifest.authManager != nil {
 			for _, auth := range c.manifest.authManager.List() {
+				// List also includes retired/disabled auth snapshots. Pinning one
+				// makes the scheduler reject every active account before selection.
+				// Complete history may choose a new account; protected incremental
+				// history must keep the existing unavailable-owner error instead.
+				if auth == nil || auth.Disabled || auth.Status == coreauth.StatusDisabled {
+					continue
+				}
 				if account := accountForAuthInManifest(c.manifest, auth); account != nil && account.ID == result.PreferredAccountID {
 					mapped = auth.ID
 					break
