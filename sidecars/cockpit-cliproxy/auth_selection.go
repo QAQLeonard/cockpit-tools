@@ -1360,7 +1360,7 @@ func (s *cockpitSelector) emitAuthPoolUnavailable(
 	if errors.As(err, &authErr) && authErr != nil && strings.TrimSpace(authErr.Code) != "" {
 		errorCode = strings.TrimSpace(authErr.Code)
 	}
-	s.emitter.emit(requestDiagnosticPayload{
+	payload := requestDiagnosticPayload{
 		Type:                    "auth_pool_result",
 		StartedAtMS:             requestStartedAtMS(ctx),
 		RequestID:               internallogging.GetRequestID(ctx),
@@ -1380,7 +1380,11 @@ func (s *cockpitSelector) emitAuthPoolUnavailable(
 		ImagePolicyBlockedAuths: stats.imagePolicyBlockedAuths,
 		AccountStatuses:         stats.members,
 		ScopeDiagnostics:        stats.scopeDiagnostics,
-	})
+	}
+	if deferRequestPoolDiagnostic(ctx, s.emitter, payload) {
+		return
+	}
+	s.emitter.emit(payload)
 }
 
 func unavailableAuthDiagnostic(auth *coreauth.Auth, model string, now time.Time) (string, string) {
